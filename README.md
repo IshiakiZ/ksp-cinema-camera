@@ -3,14 +3,15 @@
 The flight camera worked like a real one: a lens, a sensor, an aperture, a focus, a shutter and a film
 speed, each doing to the picture what it does on a camera. And a viewfinder to look through.
 
-For Kerbal Space Program 1.12.x. Needs [Keystone](https://github.com/IshiakiZ/ksp-keystone), which comes in the download, and
+For Kerbal Space Program 1.12.x. Needs [Keystone](https://github.com/IshiakiZ/ksp-keystone), a separate download ([its page on SpaceDock](https://spacedock.info/mod/4665/Keystone)) without which this mod does not load, and
 nothing else: the blur, the smear and the grain are done by a lens of Keystone's own.
 
 ![A 24 mm lens with the lens's character at full; a 200 mm lens at f/2.8; a 35 mm lens at f/1.4 focused on the ship, with cinema bars; the same focused by hand at 3 m](src/CineCamera/img/cine-four.jpg)
 
 ## Install and use
 
-Copy the `Keystone` and `CineCamera` folders from the download into your KSP `GameData`.
+Install [Keystone](https://github.com/IshiakiZ/ksp-keystone) first: it is a download of its own, and its `Keystone` folder goes into your KSP
+`GameData`. Then copy the `CineCamera` folder from this mod's download into `GameData` beside it.
 Open the Keystone window (the keystone button on the game's toolbar, or Option-K on a Mac, Alt-K
 elsewhere), turn to **Cinema Camera** and switch it on.
 
