@@ -1,0 +1,19 @@
+Cinema Camera @VERSION@
+for Kerbal Space Program 1.12.x
+
+The flight camera worked like a real one: lens, sensor, aperture, focus, shutter and film speed, and a viewfinder to look through.
+
+INSTALL
+  Copy both folders in this download (Keystone and CineCamera) into your KSP's
+  GameData folder, and start the game. Keystone is the base this mod stands on; one copy
+  serves every mod that uses it. To remove the mod, delete the CineCamera folder.
+
+USE
+  Open the Keystone window: the keystone button on the game's toolbar, or Option-K on a
+  Mac and Alt-K elsewhere. Then turn to Cinema Camera and switch it on.
+
+WHERE IT WORKS
+  Made and tried on a Mac, and tried on Windows 11: Keystone's lens (its shader built for
+  Direct3D), the viewfinder, the bars and the moves. Nobody has run it on Linux yet.
+
+Everything else: https://github.com/IshiakiZ/ksp-cinema-camera
