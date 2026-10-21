@@ -40,6 +40,25 @@ namespace CineCamera
         public bool Spot;
 
         /// <summary>
+        /// The picture's spread of brightness at the last reading, for a camera's histogram (the whole picture but what is under
+        /// cinema bars): how much of it (all of it adding up to 1) is shown at each of 64 steps from black to white. Floor: how much
+        /// is at black, or within a hair of it, where a sensor has only its noise; ClipRed, ClipGreen, ClipBlue: how much is at
+        /// white in each colour, where a sensor is full (RED's goal posts and traffic lights). From the shrunk picture, each of its
+        /// dots the mean of a square of the whole, so a speck of white too small to fill one is not seen clipped.
+        /// </summary>
+        public readonly float[] Bins = new float[64];
+        public float Floor, ClipRed, ClipGreen, ClipBlue;
+
+        /// <summary>
+        /// The same picture as a waveform monitor shows it: for each column of the shrunk picture (WaveWide of them, left to right),
+        /// how many of its dots are at each of Levels steps of brightness from black (0) to white; and how many dots a column has
+        /// (WaveHigh). Reads counts the readings, for whoever draws it to know when it has changed.
+        /// </summary>
+        public const int Levels = 40;
+        public int[] Wave = new int[0];
+        public int WaveWide, WaveHigh, Reads;
+
+        /// <summary>
         /// While the meter is wanted, every frame (from LateUpdate): the camera whose picture is the finished one, the camera's
         /// own exposure just now (in stops), and how much of the picture's height is not under cinema bars (0 to 1).
         /// </summary>
@@ -74,7 +93,9 @@ namespace CineCamera
                 RenderTexture.active = small;
                 read.ReadPixels(new Rect(0, 0, smallWide, smallHigh), 0, 0, false);
                 RenderTexture.active = was;
-                Weigh(read.GetPixels());
+                Color[] dots = read.GetPixels();
+                Weigh(dots);
+                Spread(dots);
             }
             catch (Exception) { }
         }
@@ -168,6 +189,36 @@ namespace CineCamera
             }
             Reading = all > 0 ? Mathf.Log(Mathf.Max((float)(sum / all), 1e-5f) / Grey, 2f) : float.NaN;
             ReadingExposure = askedExposure;
+        }
+
+        void Spread(Color[] dots)
+        {
+            Array.Clear(Bins, 0, Bins.Length);
+            int w = smallWide, h = smallHigh, n = 0, floor = 0, red = 0, green = 0, blue = 0, rows = 0;
+            if (Wave.Length != w * Levels) Wave = new int[w * Levels];
+            Array.Clear(Wave, 0, Wave.Length);
+            for (int y = 0; y < h; y++)
+            {
+                if (Mathf.Abs((y + 0.5f) / h * 2f - 1f) > askedShare) continue;
+                rows++;
+                for (int x = 0; x < w; x++)
+                {
+                    Color c = dots[x + y * w];
+                    float v = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+                    if (!(v >= 0f)) { if (!(v < 0f)) continue; v = 0f; }
+                    Bins[Mathf.Min((int)(Mathf.Min(v, 1f) * Bins.Length), Bins.Length - 1)] += 1f;
+                    Wave[x + Mathf.Min((int)(Mathf.Min(v, 1f) * Levels), Levels - 1) * w]++;
+                    if (v < 0.02f) floor++;
+                    if (c.r >= 0.98f) red++;
+                    if (c.g >= 0.98f) green++;
+                    if (c.b >= 0.98f) blue++;
+                    n++;
+                }
+            }
+            float each = n > 0 ? 1f / n : 0f;
+            for (int i = 0; i < Bins.Length; i++) Bins[i] *= each;
+            Floor = floor * each; ClipRed = red * each; ClipGreen = green * each; ClipBlue = blue * each;
+            WaveWide = w; WaveHigh = rows; Reads++;
         }
 
         public void Off()

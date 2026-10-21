@@ -18,6 +18,7 @@ namespace CineCamera
         float found = -1f;
         readonly Dictionary<Mesh, KeyValuePair<Vector3[], int[]>> shapes = new Dictionary<Mesh, KeyValuePair<Vector3[], int[]>>();
         readonly List<KeyValuePair<float, Renderer>> boxes = new List<KeyValuePair<float, Renderer>>();
+        readonly RaycastHit[] hits = new RaycastHit[16];
 
         /// <summary>The distance to what the cockpit's camera looks at, in metres; nothing (less than nought) if it looks out through a window.</summary>
         public float Distance(Camera cockpit)
@@ -27,7 +28,22 @@ namespace CineCamera
             measuredAt = Time.unscaledTime + 0.2f;
             Vector3 from = cockpit.transform.position, ahead = cockpit.transform.forward;
             float best = float.MaxValue;
-            if (Physics.Raycast(from, ahead, out RaycastHit hit, 30f, (1 << 16) | (1 << 20), QueryTriggerInteraction.Collide)) best = hit.distance;
+#if DEV
+            hitBy = "";
+#endif
+            int count = Physics.RaycastNonAlloc(from, ahead, hits, 30f, (1 << 16) | (1 << 20), QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = hits[i];
+                // (a trigger that is no part of a prop is one of the cockpit's own click-areas for moving the camera, to a window or
+                // to the kerbal's face ("Cam1Trigger", "SelfieTrigger2"): nothing to be seen, and it stands just in front of the eye
+                // and over the windows. Looked through: until 2026-10-18 the focus out of a plane's window was on one, 0.2 m off.)
+                if (hit.collider == null || hit.distance >= best || (hit.collider.isTrigger && hit.collider.GetComponentInParent<InternalProp>() == null)) continue;
+                best = hit.distance;
+#if DEV
+                hitBy = "collider " + hit.collider.name + " on layer " + hit.collider.gameObject.layer;
+#endif
+            }
             if (InternalSpace.Instance != null && (pieces == null || Time.unscaledTime > piecesAt))
             {
                 pieces = InternalSpace.Instance.GetComponentsInChildren<Renderer>();
@@ -55,7 +71,14 @@ namespace CineCamera
                 {
                     if (box.Key >= best || tried++ > 12) break;
                     float d = Hit(box.Value, ray);
-                    if (d > 0f && d < best) best = d;
+                    if (d > 0f && d < best)
+                    {
+                        best = d;
+#if DEV
+                        Material m = box.Value.sharedMaterial;
+                        hitBy = "piece " + box.Value.name + " (" + (m != null ? m.shader.name + ", queue " + m.renderQueue : "no material") + ", layer " + box.Value.gameObject.layer + ")";
+#endif
+                    }
                 }
             }
             found = best < 30f ? best : -1f;
@@ -108,7 +131,8 @@ namespace CineCamera
         }
 
 #if DEV
-        public string Said => "cockpit focus: " + (pieces != null ? pieces.Length : 0) + " pieces, " + boxes.Count + " boxes on the line last time, " + shapes.Count + " shapes read, found " + found.ToString("F3") + " m";
+        string hitBy = "";
+        public string Said => "hit: " + hitBy + "; " + "cockpit focus: " + (pieces != null ? pieces.Length : 0) + " pieces, " + boxes.Count + " boxes on the line last time, " + shapes.Count + " shapes read, found " + found.ToString("F3") + " m";
 #endif
 
         public void Forget()

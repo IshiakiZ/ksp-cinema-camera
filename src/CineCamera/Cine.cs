@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using Keystone;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 #if !DEV
 [assembly: KSPAssembly("CineCamera", 0, 6)]
@@ -42,26 +44,27 @@ namespace CineCamera
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public sealed class Cine : MonoBehaviour
     {
-        public const string Version = "0.6.1";
+        public const string Version = "0.7.0";
 
         static readonly string[] Sensors = { "full frame", "super 35", "IMAX 70 mm" };
         static readonly float[] SensorHigh = { 24f, 18.66f, 52.63f };                 // millimetres
         static readonly string[] Bars = { "none", "1.85 : 1", "2.39 : 1" };
         static readonly float[] BarShape = { 0f, 1.85f, 2.39f };
         // (the moves, as the page lists them; kept by name in the settings file, so the list can grow)
-        const int Still = 0, Stay = 1, Circle = 2, Drift = 3, Fly = 4;
-        static readonly string[] Moves = { "none", "stay here and follow", "circle the ship", "drift and follow", "fly the path" };
+        const int Still = 0, Stay = 1, Circle = 2, Drift = 3, Fly = 4, Track = 5, Chase = 6;
+        static readonly string[] Moves = { "none", "stay here and follow", "circle the ship", "drift and follow", "fly the path", "track from afar", "chase" };
 
         static Mod mod;
         static Toggle on;
-        static Slider focal, stop, hand, pull, shutter, speed, character, filter, round, span;
-        static Choice sensor, focus, bokeh, bars, finder, exposure, move, meter;
+        static Slider focal, stop, hand, pull, shutter, speed, character, filter, round, span, cutTime, trackFar, shaky, rack, flares;
+        static Choice sensor, focus, bokeh, bars, finder, exposure, move, meter, cut;
         static Toggle keep;
 
         public static void Setup()
         {
             if (mod != null && Kit.Find("Cinema Camera") == mod) return;
             mod = Kit.Register("Cinema Camera", Version, "The flight camera worked like a real one: lens, sensor, aperture, focus, shutter and film speed, each doing to the picture what it does on a camera.");
+            try { Keys(mod); } catch (Exception) { }             // (for Keystone's page of every key; not with a Keystone older than 0.9.0)
             on = mod.Toggle("on", "Cinema camera", false, "On: the flight camera takes its angle of view from the lens below, and the picture gets depth of field, motion blur and grain from the settings. Off: the game's camera as it was.");
             mod.Heading("Lens");
             focal = mod.Slider("focal", "Focal length", 50f, 12f, 300f, " mm", 0, "A short lens sees wide and keeps nearly everything sharp; a long one sees narrow and throws the background out of focus. The game's own zoom keys turn this ring too.");
@@ -71,6 +74,7 @@ namespace CineCamera
             focus = mod.Choice("focus", "Focus on", 0, new[] { "the ship", "the middle", "by hand" }, "The ship being flown, whatever is in the middle of the picture, or a distance you set.");
             hand = mod.Slider("hand", "Distance", 10f, 0.5f, 300f, " m", 1, "Where the focus is when it is set by hand.");
             pull = mod.Slider("pull", "Focus speed", 4f, 0.5f, 20f, "", 1, "How quickly the focus follows when what it is on moves nearer or further.");
+            rack = mod.Slider("rack", "A pull of focus takes", 1.2f, 0f, 4f, " s", 1, "When what the focus is on is changed (F with the modifier key, or here), the focus is pulled from the one to the other over so long, as a focus puller turns the ring: slowly at first, quickly through the middle, settling at the end. 0: at the focus speed above.");
             bokeh = mod.Choice("bokeh", "Blur quality", 1, new[] { "small", "medium", "large" }, "How large the out-of-focus blur may get. Larger costs more of the graphics card's time.");
             mod.Heading("Shutter and film");
             shutter = mod.Slider("shutter", "Shutter  1 /", 120f, 24f, 2000f, " s", 0, "How long the shutter is open. Long times (small numbers) smear what moves; short ones freeze it. It cannot be open for longer than a frame of the game lasts.");
@@ -78,12 +82,17 @@ namespace CineCamera
             exposure = mod.Choice("exposure", "Exposure", 0, new[] { "left alone", "by the camera" }, "By the camera: how bright the picture comes out goes by the aperture, the shutter and the film speed, as it does in a real one. Full sun wants f/16 at 1/100 s on ISO 100 film (or anything that lets in as much); open the lens or slow the shutter in the dark. It needs the TUFX mod to do it. Left alone: the picture is as bright as the game, or another mod's eye, makes it.");
             filter = mod.Slider("filter", "Grey filter", 0f, 0f, 12f, " stops", 1, "A grey filter in front of the lens, to hold the light back by so many stops: for a wide-open lens or a slow shutter in daylight.");
             character = mod.Slider("character", "Lens character", 0.3f, 0f, 1f, "", 2, "How much the lens shows of itself: darker corners (most with the aperture wide open), a little colour fringing, and the bend of a wide lens. None at 0.");
+            flares = mod.Slider("flares", "Lamps' flare", 0.5f, 0f, 1f, "", 2, "How much a lamp shining into the lens flares, as real lenses do: a soft glare, rays from the aperture's blades (longer the more it is stopped down, barely any wide open), and faint ghosts of the aperture across the picture (by the lens's character). Only while the lamp is in sight. The sun's flare is the game's own (or Scatterer's). None at 0.");
             bars = mod.Choice("bars", "Bars", 0, Bars, "Black bars for a cinema-shaped picture. They are drawn only while the game's interface is hidden (F2), or the viewfinder is up.");
             mod.Heading("Moves");
             move = mod.Choice("move", "Camera move", 0, Moves, "Stay here and follow: the camera is left where it is, fixed to the ground (or to the spot over it), and turns to follow the ship as it flies off, as a camera on a tripod by the launch pad does. Circle the ship: the camera goes slowly round it. Drift and follow: for space. The camera is left where it is, going on at the speed the ship had, as a camera on a second spacecraft would: a burn takes the ship away from it, and it turns to follow. Fly the path: the camera flies through the points of the path set below. With the game's modifier key, T leaves the camera where it is (fixed to the ground near a world, drifting in space) and takes it back, and Y flies the path.");
+            trackFar = mod.Slider("trackfar", "Tracker's distance", 4f, 0.5f, 15f, " km", 1, "Track from afar: the camera is put down on the ground so far from the ship, to the side of its way with the sun behind the camera, as the long-lens trackers that film launches stand kilometres from the pad, and follows it out with its lens drawn out to keep its size.");
+            shaky = mod.Slider("shaky", "Hand-held", 0f, 0f, 1f, "", 2, "While a move holds the camera (staying, tracking, the chase, a path): 0 as on a tripod, 1 as held in the hands, the picture wandering a little and swaying with the breath, the more through a long lens. A camera near a launch shakes with its roar whatever this is, once the sound gets to it.");
             keep = mod.Toggle("keep", "Zoom to keep the ship's size", true, "While the camera stays behind, the lens is drawn out as the ship gets further off, so that it stays the size it was in the picture: as far as a 2400 mm lens, which is what the cameras that follow real launches have.");
             round = mod.Slider("round", "Circling", 6f, -30f, 30f, " ° a second", 1, "How fast the camera goes round the ship. Less than nought: the other way.");
             span = mod.Slider("span", "Path takes", 10f, 2f, 120f, " s", 0, "How long the camera takes to fly the path, from its first point to its last.");
+            cut = mod.Choice("cut", "Between moves", 1, new[] { "a cut", "a dissolve", "through black" }, "How one move gives way to the next, and to the game's own camera: straight from one picture to the next, as a cut; the last picture of the one fading out over the next, as a dissolve; or down to black and up again.");
+            cutTime = mod.Slider("cuttime", "Its length", 0.8f, 0.2f, 3f, " s", 1, "How long a dissolve, or the way through black, takes.");
             mod.Heading("Viewfinder");
             finder = mod.Choice("finder", "Viewfinder", 0, new[] { "off", "on", "with thirds" }, "The game's own interface is put away and a camera's is drawn in its place: frame marks, the focus bracket, the lens, aperture, shutter and film speed, a light meter, a timecode and the ship's battery. This window still opens with the modifier key and K; F2 brings the game's interface back.");
             meter = mod.Choice("meter", "Meter", 1, new[] { "off", "centre-weighted", "spot" }, "The viewfinder's light meter: how far over (+) or under (-) a middle grey the picture comes out, in stops, as a camera's shows it. Centre-weighted: the whole picture, its middle counting most. Spot: only what is inside the focus bracket.");
@@ -96,6 +105,7 @@ namespace CineCamera
         bool inside;                                              // the game is showing the cockpit from inside, where it holds the flight camera to a kerbal's eye itself
         float angleSet = -1f, angleBefore, leastBefore;
         float focusAt = 10f, focusWanted = 10f, frames = 60f;
+        int focusWas = -1; float rackFrom = 10f, rackAge = 99f;          // (since 0.7.0: a pull of focus under way: from where, how far through)
         float stops = float.NaN;                                  // how far over (or under) what full sun wants the camera's own exposure is, when it is set by the camera
         float lensNow = 50f;                                      // the focal length the picture is taken through this frame: the ring, drawn out by a move, flown by a path, or the cockpit's own zoom
         // (a move that holds the camera: which; where it was left (on the ground: on which world, where on it; in space: the orbit it drifts
@@ -139,6 +149,9 @@ namespace CineCamera
             Stop();
             Lock(false);
             gauge.Off();
+            Unshoot();
+            if (shooting != null) { shooting.Release(); shooting = null; }
+            if (shot != null) { shot.Release(); Destroy(shot); shot = null; }
             if (mod != null && mod.Panel == Panel) mod.Panel = null;
         }
 
@@ -161,7 +174,7 @@ namespace CineCamera
             finally { ours = false; }
         }
 
-        float High => SensorHigh[sensor.Value];
+        float High => Bodies.High() > 0f ? Bodies.High() : SensorHigh[sensor.Value];
 
         /// <summary>How long this frame stands for: as the player sees it (paused or not), or a recording's own frame when the game is being filmed frame by frame.</summary>
         static float Step => Time.captureFramerate > 0 ? 1f / Time.captureFramerate : Mathf.Min(Time.unscaledDeltaTime, 0.1f);
@@ -201,6 +214,18 @@ namespace CineCamera
         /// takes it back; Y flies the path; Page Up and Page Down pull the focus further and nearer by hand for as long as
         /// they are held.
         /// </summary>
+        /// <summary>The camera's keys (with the game's modifier key held), as Keystone lists them.</summary>
+        static void Keys(Mod mod)
+        {
+            mod.Uses(KeyCode.C, true, "the camera on and off");
+            mod.Uses(KeyCode.V, true, "the viewfinder");
+            mod.Uses(KeyCode.F, true, "what the focus is on");
+            mod.Uses(KeyCode.T, true, "the camera stays where it is");
+            mod.Uses(KeyCode.Y, true, "the camera flies its path");
+            mod.Uses(KeyCode.PageUp, true, "the focus further");
+            mod.Uses(KeyCode.PageDown, true, "the focus nearer");
+        }
+
         void Update()
         {
             gauge.Read();
@@ -272,13 +297,21 @@ namespace CineCamera
             // (In the cockpit the game holds the flight camera to a kerbal's eye itself, and a move would pull the view in the windows away from
             // the cockpit round them: a move ends when the cockpit is entered, and the game's own hold is left alone.)
             if (inside && move.Value != Still) move.Value = Still;
-            int hold = ship == null || inside ? Still : move.Value == Stay || move.Value == Drift || move.Value == Fly ? move.Value : Still;
+            int hold = ship == null || inside ? Still : move.Value == Stay || move.Value == Drift || move.Value == Fly || move.Value == Track || move.Value == Chase ? move.Value : Still;
+            // (between one move and the next, a dissolve or a way through black: this frame's picture is kept as it is drawn, and
+            // the move changes with the next frame, the kept picture fading out over it (see OnGUI). Not into or out of the cockpit.)
+            if (hold != holding && cut.Value != 0 && !inside && !wasInside && shotFrame < 0 && Shoot(camera.mainCamera)) { shotFrame = Time.frameCount; hold = holding; }
+            else if (shotFrame == Time.frameCount) hold = holding;
             if (hold != holding)
             {
+                if (shotFrame >= 0) { fadeAge = 0f; Kit.Log("Cinema Camera", (cut.Value == 1 ? "a dissolve" : "through black") + " to the next move"); }
+                shotFrame = -1; Unshoot();
                 if (holding != Still) Release(camera, !inside);
                 if (hold != Still && !Hold(camera, ship, hold)) move.Value = Still;
             }
+            else if (shotFrame >= 0 && shotFrame < Time.frameCount) { shotFrame = -1; Unshoot(); }       // (asked for, and taken back before it changed)
             if (holding != Still) Place(camera, ship);
+            if (fadeAge >= 0f) fadeAge += Step;
             if (holding == Still)
             {
                 drawn = 1f;
@@ -327,18 +360,38 @@ namespace CineCamera
             }
             // (followed as a lens is turned: evenly in "one over the distance", so that it takes as long from 2 m to 4 m as from 100 m to infinity)
             focusWanted = wantedAt;
-            float follow = 1f - Mathf.Exp(-pull.Value * Step);
-            focusAt = 1f / Mathf.Lerp(1f / Mathf.Max(focusAt, 0.1f), 1f / Mathf.Max(wantedAt, 0.1f), follow);
+            // (Since 0.7.0: a change of what the focus is on is a pull of focus, over the time set, slow, quick, slow; then followed as before)
+            if (focus.Value != focusWas) { focusWas = focus.Value; rackFrom = focusAt; rackAge = 0f; }
+            if (rack.Value > 0.05f && rackAge < rack.Value)
+            {
+                rackAge += Step;
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(rackAge / rack.Value));
+                focusAt = 1f / Mathf.Lerp(1f / Mathf.Max(rackFrom, 0.1f), 1f / Mathf.Max(wantedAt, 0.1f), k);
+            }
+            else
+            {
+                float follow = 1f - Mathf.Exp(-pull.Value * Step);
+                focusAt = 1f / Mathf.Lerp(1f / Mathf.Max(focusAt, 0.1f), 1f / Mathf.Max(wantedAt, 0.1f), follow);
+            }
 
-            // ---- the shutter: open for this part of a frame
-            frames += (1f / Mathf.Clamp(Time.unscaledDeltaTime, 0.002f, 0.2f) - frames) * 0.1f;
+            // ---- the shutter: open for this part of a frame. (In a film made frame by frame, each frame stands for a set time of the
+            // film whatever the game takes to draw it: the film's frame rate, not the game's, says how much of a frame the shutter is
+            // open for. Taken from the game's, a film made at a few frames a second had a blur a tenth of what its shutter said.)
+            if (Time.captureFramerate > 0) frames = Time.captureFramerate;
+            else frames += (1f / Mathf.Clamp(Time.unscaledDeltaTime, 0.002f, 0.2f) - frames) * 0.1f;
             float open = Mathf.Clamp(360f * frames / shutter.Value, 0f, 360f);
             // ---- the film, and the lens's own marks (the corners darkest with the aperture wide open; the bend only on a wide lens, and never in
             // the cockpit, whose switches are clicked where they are seen)
             float mark = character.Value, wide = Mathf.Clamp01((4f - stop.Value) / 3f);
+            // (Since 0.7.0. Whatever is drawn beyond the near camera's reach, 400 m at the pad, lies at its far end in the picture of
+            // depths the blur is worked out from: a focus further than that, as a tracker kilometres off has, blurred the ship it is
+            // on. So the focus goes no further than that far end, where everything beyond it then lies sharp. At nine tenths of it, as
+            // first, a 2400 mm lens at f/2.8 still drew the far ship some 26 pixels wide.)
+            float focusUsed = focusAt;
+            if (!inside && camera.mainCamera != null && focusAt > camera.mainCamera.farClipPlane) focusUsed = camera.mainCamera.farClipPlane;
             var look = new Look
             {
-                focal = lensNow, sensorHigh = high, stop = stop.Value, focus = focusAt, blur = bokeh.Value,
+                focal = lensNow, sensorHigh = high, stop = stop.Value, focus = focusUsed, blur = bokeh.Value,
                 open = open > 4f ? open / 360f : 0f,
                 grain = Mathf.Clamp01(Mathf.Log(speed.Value / 100f, 2f) / 6f),
                 corners = mark * (0.48f + 0.52f * wide), fringe = mark, bend = inside ? 0f : mark * Mathf.Clamp01((35f - lensNow) / 23f),
@@ -361,6 +414,8 @@ namespace CineCamera
                 lens = best;
             }
             if (lens != null) lens.Use(picture, look);
+            // ---- (since 0.7.0) lamps flaring in the lens (not in the cockpit, whose own camera draws over the view out of it)
+            if (!inside) Flares.Use(camera.mainCamera, flares.Value, stop.Value, character.Value); else Flares.Off();
 
             // ---- the meter, while the viewfinder is up (it is part of it)
             bool metering = viewing && meter.Value != 0;
@@ -383,7 +438,7 @@ namespace CineCamera
             float beyond = f * f / (n * blurry) + f, at = focusAt * 1000f;
             float nearest = at * (beyond - f) / (beyond + at - 2f * f), furthest = at >= beyond ? float.PositiveInfinity : at * (beyond - f) / (beyond - at);
             readout = Doing(true)
-                      + f.ToString("F0") + " mm on " + Sensors[sensor.Value] + ": " + angle.ToString(angle < 3f ? "F2" : "F1") + "° from top to bottom. In focus at " + Metres(focusAt) + "; sharp from " + Metres(nearest / 1000f) + " to " +
+                      + f.ToString("F0") + " mm on " + (Bodies.SensorSaid() ?? Sensors[sensor.Value]) + ": " + angle.ToString(angle < 3f ? "F2" : "F1") + "° from top to bottom. In focus at " + Metres(focusAt) + "; sharp from " + Metres(nearest / 1000f) + " to " +
                       (float.IsInfinity(furthest) ? "as far as can be seen" : Metres(furthest / 1000f)) + ". Shutter open for " + (open / 360f * 100f).ToString("F0") + "% of each frame" +
                       (360f * frames / shutter.Value > 360f ? " (all a frame has: the game is drawing " + frames.ToString("F0") + " a second)" : "") + "."
                       + (float.IsNaN(stops) ? "" : Film.Best == null ? "\n<color=#ffc080>The exposure cannot be set by the camera here. " + Film.WhyNot + "</color>"
@@ -409,6 +464,10 @@ namespace CineCamera
                     return words ? "The camera is staying where it was left, " + Metres(far) + " from the ship" + (drawn > 1.02f ? ", its lens drawn out to follow" : "") + ". " : "STAYING   " + Metres(far).ToUpperInvariant() + " OFF";
                 case Drift:
                     return words ? "The camera is drifting where it was left, at the speed the ship had then, " + Metres(far) + " from the ship" + (drawn > 1.02f ? ", its lens drawn out to follow" : "") + ". " : "DRIFTING   " + Metres(far).ToUpperInvariant() + " OFF";
+                case Track:
+                    return words ? "The camera is tracking from afar, on the ground " + Metres(far) + " from the ship, its lens at " + (focal.Value * drawn).ToString("F0") + " mm. " : "TRACKING   " + Metres(far).ToUpperInvariant() + " OFF";
+                case Chase:
+                    return words ? "The camera is chasing the ship, " + Metres(far) + " off, keeping its station a moment behind its every change. " : "CHASE   " + Metres(far).ToUpperInvariant() + " OFF";
                 case Fly:
                     bool flown = pathTime >= span.Value;
                     return words ? (flown ? "The path has been flown: the camera stays at its last point, going along with the ship, until the move is changed. " : "Flying the path: " + pathTime.ToString("F1") + " of " + span.Value.ToString("F0") + " s. ")
@@ -466,6 +525,68 @@ namespace CineCamera
                 stayOn = ship.mainBody;
                 stayLat = stayOn.GetLatitude(here); stayLon = stayOn.GetLongitude(here); stayHigh = stayOn.GetAltitude(here);
             }
+            else if (how == Track)
+            {
+                // (Since 0.7.0.) Put down on the ground so far off, square to the ship's way (east, for one standing on the pad), on the side
+                // where the sun is behind the camera; its lens drawn out to have the ship a third of the picture high, and further as it goes.
+                CelestialBody body = ship.mainBody;
+                if (body == null) return false;
+                Vector3d at = ship.CoMD, up = (at - body.position).normalized;
+                Vector3d north = Vector3d.Exclude(up, body.transform.up).normalized, east = Vector3d.Cross(up, north);
+                Vector3d level = Vector3d.Exclude(up, ship.srf_velocity);
+                Vector3d way = level.magnitude > 20.0 ? level.normalized : east;
+                Vector3d side = Vector3d.Cross(up, way).normalized;
+                CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+                if (sun != null && Vector3d.Dot(side, (sun.position - at).normalized) < 0.0) side = -side;
+                double far = Mathf.Clamp(trackFar.Value, 0.5f, 15f) * 1000.0;
+                Vector3d place = at + side * far;
+                stayOn = body;
+                stayLat = body.GetLatitude(place); stayLon = body.GetLongitude(place);
+                double ground = body.TerrainAltitude(stayLat, stayLon, true);
+                if (body.ocean && ground < 0.0) ground = 0.0;
+                // (on a mast of ten metres, and above whatever ground lies between it and the ship, so that it sees the ship's foot: the
+                // ground along the way looked at in twelve places)
+                double high = ground + 10.0, shipHigh = body.GetAltitude(at);
+                for (int k = 1; k < 12; k++)
+                {
+                    double f = k / 12.0;
+                    Vector3d p = place + (at - place) * f;
+                    double g = body.TerrainAltitude(body.GetLatitude(p), body.GetLongitude(p), true);
+                    if (body.ocean && g < 0.0) g = 0.0;
+                    // (the camera so high that the line from it to the ship's foot passes five metres over this ground)
+                    if (f < 0.999) high = Math.Max(high, (g + 5.0 - f * shipHigh) / (1.0 - f));
+                }
+                stayHigh = Math.Min(high, ground + 300.0);
+                // (how long the ship is: the furthest of its parts from its middle, both ways)
+                float length = 4f;
+                foreach (Part part in ship.parts) if (part != null) length = Mathf.Max(length, 2f * Vector3.Distance(part.transform.position, ship.CoM) + 2f);
+                float wanted = High * (float)far / (3f * length);                                   // (mm: the ship a third of the picture high)
+                Vector3d spot = body.GetWorldSurfacePosition(stayLat, stayLon, stayHigh);
+                stayFar = Mathf.Max(5f, (float)(spot - at).magnitude) * focal.Value / Mathf.Max(wanted, focal.Value);
+                stayLook = Quaternion.LookRotation((Vector3)(at - spot), (Vector3)up);
+                drawn = 1f;
+                camera.DeactivateUpdate();
+                holding = how;
+                return true;
+            }
+            else if (how == Chase)
+            {
+                // (Since 0.7.0.) Where the camera is now from the ship, kept in the ship's own way of going (along its way over the ground, up,
+                // across), as a chase plane keeps station; at least 12 m off.
+                if (ship.mainBody == null) return false;
+                ChaseFrame(ship, out Vector3 fwd, out Vector3 up, out Vector3 side);
+                Vector3 off = camera.transform.position - ship.CoM;
+                if (off.magnitude < 12f) off = -fwd * 30f + up * 6f + side * 8f;
+                chaseAt = new Vector3(Vector3.Dot(off, fwd), Vector3.Dot(off, up), Vector3.Dot(off, side));
+                chasePos = off; chaseVel = Vector3.zero; chaseLastVel = (Vector3)ship.srf_velocity;
+                stayOn = ship.mainBody;
+                stayLook = camera.transform.rotation;
+                stayFar = off.magnitude;
+                drawn = 1f;
+                camera.DeactivateUpdate();
+                holding = how;
+                return true;
+            }
             else if (how == Drift)
             {
                 // Left in space at the ship's own speed: on an orbit of its own, the one a thing let go of there, moving as the ship
@@ -521,9 +642,10 @@ namespace CineCamera
         /// <summary>The held camera put where its move has it this frame.</summary>
         void Place(FlightCamera camera, Vessel ship)
         {
-            if (holding == Fly) { FlyPath(camera, ship); return; }
+            if (holding == Fly) { FlyPath(camera, ship); Shake(camera.transform, ship); return; }
+            if (holding == Chase) { ChaseShip(camera, ship); Shake(camera.transform, ship); return; }
             Vector3d spot;
-            if (holding == Stay) spot = stayOn.GetWorldSurfacePosition(stayLat, stayLon, stayHigh);
+            if (holding == Stay || holding == Track) spot = stayOn.GetWorldSurfacePosition(stayLat, stayLon, stayHigh);
             else
             {
                 spot = drift.getPositionAtUT(Planetarium.GetUniversalTime());
@@ -541,13 +663,119 @@ namespace CineCamera
             Quaternion wanted = Quaternion.LookRotation(ahead, Mathf.Abs(Vector3.Dot(ahead, up)) < 0.995f ? up : stayLook * Vector3.up);
             // (A ship burning away is followed into a long lens, and the moment behind that is nothing through a short one is half the
             // picture through a long one: drifting, the camera keeps the closer to it the narrower its lens sees.)
-            float rate = holding == Drift ? 7f * Mathf.Clamp(25f / Angle(focal.Value * drawn, High), 1f, 8f) : 7f;
+            float rate = holding == Drift || holding == Track ? 7f * Mathf.Clamp(25f / Angle(focal.Value * drawn, High), 1f, 8f) : 7f;
             stayLook = Quaternion.Slerp(stayLook, wanted, 1f - Mathf.Exp(-rate * Step));
             Transform rig = camera.transform;
             rig.position = spot; rig.rotation = stayLook;
+            // (where Smooth Running carries the craft on between the game's steps, a camera standing on the ground stays standing;
+            // one left drifting goes on with the craft, which it drifts beside)
+            if ((holding == Stay || holding == Track) && keepable) { try { KeepStill(); } catch (Exception) { keepable = false; } }     // (not with a Keystone older than 0.9.0)
+            Shake(rig, ship);
             float most = Mathf.Max(1f, 2400f / focal.Value);
-            float wantedDrawn = keep.Value ? Mathf.Clamp(far / stayFar, 1f, most) : 1f;
+            float wantedDrawn = keep.Value || holding == Track ? Mathf.Clamp(far / stayFar, 1f, most) : 1f;
             drawn = Mathf.Lerp(drawn, wantedDrawn, 1f - Mathf.Exp(-3f * Step));
+        }
+
+        static bool keepable = true;
+        static void KeepStill() => Keystone.Motion.KeepCamera();
+
+        // ---- (since 0.7.0) the chase: a camera keeping station on the ship as a chase plane does, a moment behind its every change
+        Vector3 chaseAt, chasePos, chaseVel, chaseLastVel;
+
+        /// <summary>The ship's own way of going: along its way over the ground (its nose's way while it hardly moves), up, and across.</summary>
+        static void ChaseFrame(Vessel ship, out Vector3 fwd, out Vector3 up, out Vector3 side)
+        {
+            up = ((Vector3)(ship.CoMD - ship.mainBody.position)).normalized;
+            Vector3 going = (Vector3)ship.srf_velocity;
+            fwd = going.magnitude > 8f ? going.normalized : ship.ReferenceTransform != null ? ship.ReferenceTransform.up : ship.transform.up;
+            if (Mathf.Abs(Vector3.Dot(fwd, up)) > 0.98f) { Vector3 n = Vector3.ProjectOnPlane((Vector3)ship.mainBody.transform.up, up); up = n.sqrMagnitude > 1e-4f ? n.normalized : Vector3.forward; }
+            side = Vector3.Cross(up, fwd).normalized;
+            up = Vector3.Cross(fwd, side).normalized;
+        }
+
+        /// <summary>
+        /// The chase camera this frame: held to its station by a spring that settles in about two seconds without overshooting, and
+        /// pushed back by the ship's own speeding up (in the ship's frame the camera is a mass the ship pulls along): a rocket's burn
+        /// leaves it behind for a moment and it closes up again; a turn swings it round wide. It looks at the ship's middle.
+        /// </summary>
+        void ChaseShip(FlightCamera camera, Vessel ship)
+        {
+            float dt = Step;
+            ChaseFrame(ship, out Vector3 fwd, out Vector3 up, out Vector3 side);
+            Vector3 target = fwd * chaseAt.x + up * chaseAt.y + side * chaseAt.z;
+            Vector3 v = (Vector3)ship.srf_velocity;
+            Vector3 speedUp = dt > 1e-4f ? (v - chaseLastVel) / dt : Vector3.zero;
+            chaseLastVel = v;
+            if (speedUp.magnitude > 200f) speedUp = Vector3.zero;                              // (the game putting the ship somewhere else)
+            const float k = 10f, c = 6.3f;                                                      // (a spring of two seconds, critically damped)
+            if (!FlightDriver.Pause)
+            {
+                Vector3 pull = k * (target - chasePos) - c * chaseVel - speedUp;
+                chaseVel += pull * dt;
+                chasePos += chaseVel * dt;
+                if ((chasePos - target).magnitude > 400f) { chasePos = target; chaseVel = Vector3.zero; }
+            }
+            Transform rig = camera.transform;
+            rig.position = ship.CoM + chasePos;
+            // (kept level with the horizon, as a chase plane's camera is: the sky's up, not the way the ship's own frame has it)
+            Vector3 sky = ((Vector3)(ship.CoMD - ship.mainBody.position)).normalized, look = -chasePos.normalized;
+            Quaternion wanted = Quaternion.LookRotation(look, Mathf.Abs(Vector3.Dot(look, sky)) < 0.995f ? sky : up);
+            stayLook = Quaternion.Slerp(stayLook, wanted, 1f - Mathf.Exp(-9f * dt));
+            rig.rotation = stayLook;
+            far = chasePos.magnitude;
+        }
+
+        // ---- (since 0.7.0) the hand's wander and the launch's roar
+        readonly Dictionary<ModuleEngines, float> litAt = new Dictionary<ModuleEngines, float>();
+        float roarLooked = -10f, roar;
+
+        /// <summary>
+        /// A held camera's own movement, on top of where its move put it: the slow wander and the breath of a camera held in the hands
+        /// (Hand-held), and the shake of a launch's roar near it, which begins when the sound gets there (a second for every 340 m)
+        /// and goes as its strength in decibels, the louder the nearer and the more thrust. Through a long lens both show the more.
+        /// </summary>
+        void Shake(Transform rig, Vessel ship)
+        {
+            float t = Time.time;
+            float hand = shaky.Value;
+            // (the roar: every running engine near the camera, heard once its sound has had time to get here)
+            if (Time.unscaledTime - roarLooked > 0.1f)
+            {
+                roarLooked = Time.unscaledTime;
+                float sum = 0f;
+                Vector3 eye = rig.position;
+                foreach (Vessel v in FlightGlobals.VesselsLoaded)
+                {
+                    if (v == null || v.parts == null) continue;
+                    float d = Vector3.Distance(eye, v.CoM);
+                    if (d > 6000f) continue;
+                    foreach (Part part in v.parts)
+                    {
+                        if (part == null) continue;
+                        for (int m = 0; m < part.Modules.Count; m++)
+                        {
+                            if (!(part.Modules[m] is ModuleEngines e)) continue;
+                            if (!(e.finalThrust > 1f)) { litAt.Remove(e); continue; }
+                            if (!litAt.TryGetValue(e, out float since)) { since = t; litAt[e] = since; }
+                            if (t - since < d / 340f) continue;
+                            sum += e.finalThrust / Mathf.Max(d, 25f);
+                        }
+                    }
+                }
+                roar = Mathf.Clamp01(Mathf.Log10(1f + 10f * sum) / 3f);
+            }
+            if (hand <= 0.001f && roar <= 0.01f) return;
+            float lensFactor = Mathf.Clamp(lensNow / 50f, 1f, 6f);
+            // (held in the hands: drift of a few tenths of a degree, the breath every four seconds or so)
+            float yaw = hand * 0.32f * (Mathf.PerlinNoise(t * 0.45f, 1.3f) - 0.5f) * 2f + hand * 0.08f * Mathf.Sin(t * 1.55f);
+            float pitch = hand * 0.28f * (Mathf.PerlinNoise(t * 0.5f, 7.1f) - 0.5f) * 2f + hand * 0.12f * Mathf.Sin(t * 1.57f + 0.4f);
+            float tilt = hand * 0.4f * (Mathf.PerlinNoise(t * 0.3f, 11.7f) - 0.5f) * 2f;
+            // (the roar: fast and small, the more the louder; a tripod shakes as well as a hand)
+            float r = roar * roar * 1.1f;
+            yaw += r * (Mathf.PerlinNoise(t * 17f, 3.3f) - 0.5f) * 2f;
+            pitch += r * (Mathf.PerlinNoise(t * 19f, 5.9f) - 0.5f) * 2f;
+            tilt += 0.5f * r * (Mathf.PerlinNoise(t * 13f, 8.2f) - 0.5f) * 2f;
+            rig.rotation = rig.rotation * Quaternion.Euler(pitch / lensFactor * Mathf.Sqrt(lensFactor), yaw / lensFactor * Mathf.Sqrt(lensFactor), tilt);
         }
 
         /// <summary>
@@ -638,6 +866,7 @@ namespace CineCamera
             View(false);
             if (lens != null) lens.Off();
             lens = null;
+            Flares.Off();
             gauge.Off();
             metered = float.NaN;
             Lock(false);
@@ -669,6 +898,7 @@ namespace CineCamera
                 black.SetPixel(0, 0, Color.white);
                 black.Apply();
             }
+            Fade();
             float top = 0f, bottom = Screen.height;
             if (hidden && bars.Value != 0)
             {
@@ -681,7 +911,58 @@ namespace CineCamera
                     top = bar; bottom = Screen.height - bar;
                 }
             }
-            if (viewing) Finder(top, bottom);
+            // (a real camera's own screen in its place, where one is chosen: Bodies.cs)
+            if (viewing && !Bodies.Draw(top, bottom, lensNow, focusAt, Mathf.Abs(1f / Mathf.Max(focusAt, 0.1f) - 1f / Mathf.Max(focusWanted, 0.1f)) < 0.03f / Mathf.Max(focusAt, 0.1f), Doing(false))) Finder(top, bottom);
+        }
+
+        // ---- the way from one move to the next
+        RenderTexture shot;                 // (the last picture of the move that ends, as drawn, with nothing of the interface)
+        CommandBuffer shooting;
+        Camera shotBy;
+        int shotFrame = -1;
+        float fadeAge = -1f;                // (how far the fade has gone, by the camera's own step: a film made frame by frame has it at its own pace)
+
+        /// <summary>This frame's picture kept as the near camera finishes it (after its own effects, before any interface). False if it cannot be.</summary>
+        bool Shoot(Camera near)
+        {
+            if (near == null) return false;
+            if (shot == null || shot.width != Screen.width || shot.height != Screen.height)
+            {
+                if (shot != null) { shot.Release(); Destroy(shot); }
+                // (kept in a picture with no alpha of its own, which reads as solid: the camera's own alpha is anything, and the kept
+                // picture is faded over the next by a colour's alpha)
+                RenderTextureFormat kind = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGB111110Float) ? RenderTextureFormat.RGB111110Float : RenderTextureFormat.RGB565;
+                shot = new RenderTexture(Screen.width, Screen.height, 0, kind) { name = "Cinema Camera: the last of a move" };
+                if (shooting != null) { Unshoot(); shooting.Release(); shooting = null; }
+            }
+            if (shooting == null)
+            {
+                shooting = new CommandBuffer { name = "Cinema Camera: the last of a move" };
+                shooting.Blit(BuiltinRenderTextureType.CameraTarget, shot);
+            }
+            near.AddCommandBuffer(CameraEvent.AfterEverything, shooting);
+            shotBy = near;
+            return true;
+        }
+
+        void Unshoot()
+        {
+            if (shotBy != null && shooting != null) shotBy.RemoveCommandBuffer(CameraEvent.AfterEverything, shooting);
+            shotBy = null;
+        }
+
+        /// <summary>The kept picture over the new move's: fading out (a dissolve), or down to black and up again.</summary>
+        void Fade()
+        {
+            if (fadeAge < 0f || shot == null) return;
+            float t = fadeAge / Mathf.Max(cutTime.Value, 0.05f);
+            if (t >= 1f) { fadeAge = -1f; return; }
+            var whole = new Rect(0f, 0f, Screen.width, Screen.height);
+            Color was = GUI.color;
+            if (cut.Value == 1) { GUI.color = new Color(1f, 1f, 1f, 1f - Mathf.SmoothStep(0f, 1f, t)); GUI.DrawTexture(whole, shot); }
+            else if (t < 0.5f) { GUI.color = Color.white; GUI.DrawTexture(whole, shot); Fill(whole, new Color(0f, 0f, 0f, Mathf.SmoothStep(0f, 1f, 2f * t))); }
+            else Fill(whole, new Color(0f, 0f, 0f, Mathf.SmoothStep(0f, 1f, 2f * (1f - t))));
+            GUI.color = was;
         }
 
         static void Fill(Rect where, Color colour)
@@ -927,6 +1208,88 @@ namespace CineCamera
             return "preferring " + (Lens.PreferOther ? "the other lens (" + (Lens.Other != null ? Lens.Other.Name : "there is none") + ")" : "Keystone's own");
         }
 
+        /// <summary>For the development build: the lamps' flares (since 0.7.0): how many lamps are known, in sight, flared.</summary>
+        public static string FlaresSaid() => Flares.Said;
+        /// <summary>For the development build: every lamp the flares know, where it is from the craft and which way it shines, and how much of it is shown.</summary>
+        public static string FlaresLamps() => Flares.Lamps(FlightCamera.fetch != null ? FlightCamera.fetch.mainCamera : Camera.main);
+        /// <summary>For the development build: a test flare in the middle of the picture, "on" or "off", to see the drawing alone; and which of the camera's passes come after it.</summary>
+        public static string FlaresTest(string arg)
+        {
+            string a = (arg ?? "").Trim();
+            if (a == "effects" || a == "alpha") { Flares.When = a == "effects" ? UnityEngine.Rendering.CameraEvent.AfterImageEffects : UnityEngine.Rendering.CameraEvent.AfterForwardAlpha; return "flares drawn " + Flares.When; }
+            if (a == "object" || a == "drawmesh") { Flares.ByObject = a == "object"; Flares.Off(); return "flares drawn by " + (Flares.ByObject ? "an object of their own" : "Graphics.DrawMesh"); }
+            if (a.StartsWith("shader:")) return Flares.Remake(a.Substring(7).Trim());
+            if (a == "material" || a == "white" || a == "nomips" || a == "picture")
+            {
+                Material m = Flares.Glow;
+                if (m == null) return "the flares have no material yet";
+                if (a == "white") m.mainTexture = Texture2D.whiteTexture;
+                else if (a == "nomips") m.mainTexture = Flares.Picture(false);
+                else if (a == "picture") m.mainTexture = Flares.Picture(true);
+                var tex = m.mainTexture as Texture2D;
+                return m.shader.name + ", queue " + m.renderQueue + ", keywords [" + string.Join(" ", m.shaderKeywords) + "], _MainTex " + (tex != null ? tex.name + " " + tex.width + "x" + tex.height + " " + tex.format + " mips " + tex.mipmapCount + " " + tex.filterMode + " " + tex.wrapMode : "none")
+                    + ", scale " + m.mainTextureScale.ToString("F2") + " offset " + m.mainTextureOffset.ToString("F2") + (m.HasProperty("_TintColor") ? ", tint " + m.GetColor("_TintColor") : "") + (m.HasProperty("_InvFade") ? ", invfade " + m.GetFloat("_InvFade") : "")
+                    + "; the texture limit " + QualitySettings.masterTextureLimit;
+            }
+            if (a.StartsWith("dist:")) { float.TryParse(a.Substring(5), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out Flares.PlaneAt); return "the flares laid " + (Flares.PlaneAt > 0f ? Flares.PlaneAt + " m before the lens" : "just past the lens's nearest reach"); }
+            if (a == "cube" || a == "nocube" || a.StartsWith("cube:"))
+            {
+                // (the bluntest test there is: a plain bright cube held 2 m before the flight camera's lens, every frame; if even
+                // this does not show, the picture seen is not the one that camera draws. "cube:<shader>": the cube in white with
+                // that shader, made as the flares' material is; "cube:flares": with the flares' own material)
+                GameObject old = GameObject.Find("Cinema Camera test cube");
+                if (old != null) Destroy(old);
+                if (a == "nocube") return "test cube taken away";
+                string named = a.StartsWith("cube:") ? a.Substring(5).Trim() : null;
+                Material paint;
+                string with;
+                if (named == "flares")
+                {
+                    paint = Flares.Glow;
+                    if (paint == null) return "the flares have no material yet (Cinema Camera on, flares above 0)";
+                    with = "the flares' own material (" + paint.shader.name + ")";
+                }
+                else if (named != null)
+                {
+                    Shader one = Shader.Find(named);
+                    if (one == null) return "no shader " + named;
+                    paint = new Material(one);
+                    if (paint.HasProperty("_TintColor")) paint.SetColor("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.5f));
+                    if (paint.HasProperty("_Color")) paint.SetColor("_Color", Color.white);
+                    with = one.name + (one.isSupported ? "" : ", not supported") + ", queue " + paint.renderQueue;
+                }
+                else
+                {
+                    Shader plain = Shader.Find("Unlit/Color") ?? Shader.Find("KSP/Unlit");
+                    if (plain == null) return "no plain shader";
+                    paint = new Material(plain);
+                    if (paint.HasProperty("_Color")) paint.SetColor("_Color", new Color(1f, 0.2f, 0.8f));
+                    with = plain.name;
+                }
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.name = "Cinema Camera test cube";
+                Destroy(cube.GetComponent<Collider>());
+                cube.layer = 0;
+                cube.transform.localScale = Vector3.one * 0.3f;
+                cube.GetComponent<Renderer>().sharedMaterial = paint;
+                cube.AddComponent<HeldBeforeLens>();
+                Camera cam0 = FlightCamera.fetch != null ? FlightCamera.fetch.mainCamera : null;
+                return "test cube held 2 m before the lens (" + with + ")" + (cam0 != null ? "; " + cam0.name + " near " + cam0.nearClipPlane.ToString("F2") + " far " + cam0.farClipPlane.ToString("F0") + ", layer 0 " + ((cam0.cullingMask & 1) != 0 ? "drawn" : "NOT drawn") + ", soft particles " + QualitySettings.softParticles : "");
+            }
+            Flares.TestFlare = a == "on";
+            Camera cam = FlightCamera.fetch != null ? FlightCamera.fetch.mainCamera : null;
+            var say = new System.Text.StringBuilder("test flare " + (Flares.TestFlare ? "on" : "off"));
+            if (cam != null)
+            {
+                say.Append("; ").Append(cam.name).Append(", hdr ").Append(cam.allowHDR).Append(", target ").Append(cam.targetTexture != null ? cam.targetTexture.name : "the screen").Append("; its passes:");
+                foreach (UnityEngine.Rendering.CameraEvent when in Enum.GetValues(typeof(UnityEngine.Rendering.CameraEvent)))
+                    foreach (UnityEngine.Rendering.CommandBuffer b in cam.GetCommandBuffers(when)) say.Append(" [").Append(when).Append(": ").Append(b.name).Append(']');
+                say.Append("; on it:");
+                foreach (Component c in cam.GetComponents<Component>()) say.Append(' ').Append(c.GetType().Name);
+            }
+            return say.ToString();
+        }
+
         /// <summary>For the development build: what the camera is doing, in a line.</summary>
         public static string Stats()
         {
@@ -935,7 +1298,9 @@ namespace CineCamera
             return (one.running ? "running (" + (one.lens == null ? "no lens" : one.lens.Name + "'s lens") + "): " : "not running: ") + one.readout + " | on " + on.Value + ", f/" + stop.Value + ", focus " + focus.Options[focus.Value] + ", bars " + bars.Options[bars.Value]
                    + ", interface hidden " + one.hidden + " | move " + move.Options[move.Value] + ", holding " + one.holding + ", far " + one.far.ToString("F1") + ", drawn " + one.drawn.ToString("F2") + ", lens " + one.lensNow.ToString("F1")
                    + " | path for \"" + one.pathFor + "\": " + one.path.Points.Count + " points, " + one.path.Turns + ", flown " + one.pathTime.ToString("F2") + " s | " + one.gauge.Said + ", shown " + (float.IsNaN(one.metered) ? "none" : one.metered.ToString("F2"))
-                   + " | inside " + one.inside + ", keys held off " + one.locked + " | " + one.within.Said + ", focus at " + one.focusAt.ToString("F3");
+                   + " | inside " + one.inside + ", keys held off " + one.locked + " | " + one.within.Said + ", focus at " + one.focusAt.ToString("F3")
+                   + (FlightCamera.fetch != null && FlightCamera.fetch.mainCamera != null ? ", the near camera's far end " + FlightCamera.fetch.mainCamera.farClipPlane.ToString("F0") : "")
+                   + ", roar " + one.roar.ToString("F2");
         }
 
         /// <summary>For the development build: put a point of the path where the camera is (as the page's button does).</summary>
@@ -951,6 +1316,8 @@ namespace CineCamera
         public static string Kept() { Cine one = Running(); return one == null ? "not in flight" : CinePath.KeyFor(one.pathFor) + " = " + (mod.Kept(CinePath.KeyFor(one.pathFor)) ?? "(nothing)"); }
 
         /// <summary>For the development build: into the cockpit, or out again (the game's own C key).</summary>
+        public static string CockpitSaid() { Cine one = Running(); return one == null ? "not running" : one.within.Said; }
+
         public static string Iva()
         {
             CameraManager cameras = CameraManager.Instance;
@@ -1016,4 +1383,18 @@ namespace CineCamera
         }
 #endif
     }
+
+#if DEV
+    /// <summary>(For the development build: Cine.FlaresTest "cube".) Keeps its object 2 m before the flight camera's lens, every frame.</summary>
+    sealed class HeldBeforeLens : MonoBehaviour
+    {
+        void LateUpdate()
+        {
+            Camera cam = FlightCamera.fetch != null ? FlightCamera.fetch.mainCamera : null;
+            if (cam == null) return;
+            transform.position = cam.transform.position + cam.transform.forward * 2f;
+            transform.rotation = cam.transform.rotation;
+        }
+    }
+#endif
 }
