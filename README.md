@@ -5,7 +5,7 @@ the picture what it does on a camera. With camera moves, and a viewfinder to loo
 
 ![A 24 mm lens with the lens's character at full; a 200 mm lens at f/2.8; a 35 mm lens at f/1.4 focused on the ship, with cinema bars; the same focused by hand at 3 m](src/CineCamera/img/cine-four.jpg)
 
-![The camera circling a ship in orbit](src/CineCamera/img/cinema-camera-circle.gif)
+![A launch followed from well off to one side through a 200 mm lens: the camera stays where it is and turns to follow](src/CineCamera/img/cinema-camera-follow.gif)
 
 For Kerbal Space Program 1.12.x. **Needs [Keystone](https://github.com/IshiakiZ/ksp-keystone) 0.9 or later**, a separate download
 ([on SpaceDock](https://spacedock.info/mod/4665/Keystone)): this mod does not load without it.
