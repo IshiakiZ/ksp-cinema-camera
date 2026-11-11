@@ -23,16 +23,21 @@ Open the Keystone window (the keystone button on the game's toolbar, or Alt-K; O
   grain. **Exposure** `by the camera` makes them set how bright the picture is, as on a real camera. Lamps shining into
   the lens flare as they do in a real one: a glare, rays from the aperture, faint ghosts (0.7.0).
 * **Camera moves:** stay and follow a launch from beside the pad, track it from kilometres off through a long lens as
-  launches are filmed, chase it as a chase plane does, drift beside a ship in orbit, circle the ship, or fly a path of up
-  to twelve points; from one move to the next a dissolve, a way through black, or a cut. Held by hand if you like, and
+  launches are filmed, chase it as a chase plane does, drift beside a ship in orbit, keep the ship and what it makes for in
+  one picture (a docking, a craft, a world; 0.8.0), ride bolted to the hull (0.8.0), circle the ship, or fly a path of up to
+  twelve points; from one move to the next a dissolve, a way through black, or a cut. Held by hand if you like, and
   shaken by a launch's roar once its sound gets to the camera. A change of focus is pulled, as a focus puller does.
 * **Viewfinder:** a camera's instruments in place of the game's (a focus bracket, a light meter, timecode), and
   **bars** for a 1.85:1 or 2.39:1 picture.
-* **Real cameras and LUTs:** 39 real cameras (ARRI, RED, Sony, Canon, Blackmagic and more), each with its own screen,
+* **Real cameras and LUTs:** 46 real cameras (ARRI, RED, Sony, Canon, Blackmagic, Panasonic's LUMIX and more), each with its own screen,
   recording in its maker's log; a LUT laid on live, Cinema Camera's own or any `.cube` in
   `CineCamera/PluginData/LUTs` (0.7.0).
 * **Keys,** with Alt held (Option on a Mac): `C` the camera on and off, `V` the viewfinder, `F` what the focus is on,
-  `T` leaves the camera where it is, `Y` flies the path, `Page Up` and `Page Down` pull the focus.
+  `T` leaves the camera where it is, `G` flies the path, `Page Up` and `Page Down` pull the focus.
+
+With Keystone 0.11.0, seven finer details in its Advanced view: the grain at each film speed, the lens character's
+darker corners, colour fringing and wide lens's bend, the shake from the engines' roar, and how loosely the chase and
+"the ship and its target" follow.
 
 [What each setting does](https://github.com/IshiakiZ/ksp-cinema-camera/wiki/Settings); [the cameras and LUTs](https://github.com/IshiakiZ/ksp-cinema-camera/wiki/Real-cameras-and-LUTs).
 

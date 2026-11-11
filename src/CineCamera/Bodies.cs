@@ -24,13 +24,15 @@ namespace CineCamera
     {
         // ---- the cameras
 
-        enum Maker { Arri, Venice, SonyFx, Red, Blackmagic, Canon, Panasonic, Fujifilm, Nikon }
+        enum Maker { Arri, Venice, SonyFx, Red, Blackmagic, Canon, Panasonic, Fujifilm, Nikon, Lumix }
 
         sealed class Format
         {
             public readonly string Name;
             public readonly float Wide;                           // the width of the sensor it uses, mm
-            public Format(string name, float wide) { Name = name; Wide = wide; }
+            public readonly string Codec;                         // what it writes at this size, where that is not the body's own (null: the body's)
+            public readonly float DataRate;                       // and at what rate, MB a second at 24 frames a second (0: the body's)
+            public Format(string name, float wide, string codec = null, float dataRate = 0f) { Name = name; Wide = wide; Codec = codec; DataRate = dataRate; }
         }
 
         sealed class Body
@@ -39,6 +41,7 @@ namespace CineCamera
             public Maker Maker;
             public int Curve;                                     // its maker's log, by the look's list (Luts.cs)
             public float Base;                                    // its own exposure index (its native, or first base, ISO)
+            public float Second;                                  // its second base ISO, where it has one (0: none): for its grain (Cine.Grain)
             public float[] Speeds;                                // the EI or ISO it can be set to (up to 6400: the film speed's top)
             public float[] Nd;                                    // its own grey filters, in stops, clear first; null where it has none inside
             public float Fastest;                                 // its highest frame rate, at its biggest picture
@@ -60,10 +63,23 @@ namespace CineCamera
             return list;
         }
 
+        /// <summary>Formats each with its own codec and data rate: name, width, codec, MB a second at 24p, in fours.</summary>
+        static Format[] FC(params object[] fours)
+        {
+            var list = new Format[fours.Length / 4];
+            for (int i = 0; i < list.Length; i++)
+                list[i] = new Format((string)fours[4 * i], Convert.ToSingle(fours[4 * i + 1], CultureInfo.InvariantCulture), (string)fours[4 * i + 2], Convert.ToSingle(fours[4 * i + 3], CultureInfo.InvariantCulture));
+            return list;
+        }
+
         // (Their makers' published figures: the sensor's width in each format, the exposure indices, the filters inside them. The
         // names are what the setting is kept by: never renamed. Curves: 1 LogC3, 2 LogC4, 3 S-Log3, 4 V-Log, 5 Canon Log 3, 6 Log3G10,
         // 7 Film Gen 5, 9 Canon Log 2, 10 F-Log2, 11 N-Log. F-Log2's least ISO is 1250 on the X-H2S, and taken so on Fujifilm's others;
-        // N-Log's base is 800, with 200 to 640 below it at less latitude.)
+        // N-Log's base is 800, with 200 to 640 below it at less latitude. Second bases (2026-11-08, for the grain), in each one's log
+        // as its maker gives them: Sony's, Blackmagic's 3200, Canon's 3200 (the C400's and C80's third, 12800, past the film
+        // speed's top), Panasonic's, LUMIX's from their instructions as above; the Nikon Z6III's 6400 as its users find it and
+        // Nikon gives it for the ZR. ARRI's, RED's, the URSAs' have one; the C500 Mark II, C300 Mark III and C70 one, the last two
+        // reading two gains at once instead; Fujifilm's, the Z9's and the Z8's taken to have one, no second found for certain.)
         static readonly Body[] All =
         {
             new Body { Name = "ARRI ALEXA 35", Maker = Maker.Arri, Curve = 2, Codec = "ARRIRAW", Base = 800, Speeds = ArriEi35, Nd = ArriNd, Fastest = 120, DataRate = 290,
@@ -77,20 +93,20 @@ namespace CineCamera
             new Body { Name = "ARRI ALEXA 65", Maker = Maker.Arri, Curve = 1, Codec = "ARRIRAW", Base = 800, Speeds = ArriEi, Nd = null, Fastest = 60, DataRate = 790,
                        Formats = F("6.5K Open Gate", 54.12) },
 
-            new Body { Name = "Sony VENICE 2 8K", Maker = Maker.Venice, Curve = 3, Codec = "X-OCN ST", Base = 800, Speeds = From(200), Nd = VeniceNd, Fastest = 60, DataRate = 240,
+            new Body { Name = "Sony VENICE 2 8K", Maker = Maker.Venice, Curve = 3, Codec = "X-OCN ST", Base = 800, Second = 3200, Speeds = From(200), Nd = VeniceNd, Fastest = 60, DataRate = 240,
                        Formats = F("8.6K 3:2", 35.9, "8.2K 17:9", 34.0, "5.8K 17:9", 24.1) },
-            new Body { Name = "Sony VENICE 2 6K", Maker = Maker.Venice, Curve = 3, Codec = "X-OCN ST", Base = 500, Speeds = From(125), Nd = VeniceNd, Fastest = 60, DataRate = 150,
+            new Body { Name = "Sony VENICE 2 6K", Maker = Maker.Venice, Curve = 3, Codec = "X-OCN ST", Base = 500, Second = 2500, Speeds = From(125), Nd = VeniceNd, Fastest = 60, DataRate = 150,
                        Formats = F("6K 3:2", 36.2, "4K 17:9", 24.3) },
 
-            new Body { Name = "Sony BURANO", Maker = Maker.SonyFx, Curve = 3, Codec = "X-OCN LT", Base = 800, Speeds = From(200), Nd = VariableNd, Fastest = 60, DataRate = 120,
+            new Body { Name = "Sony BURANO", Maker = Maker.SonyFx, Curve = 3, Codec = "X-OCN LT", Base = 800, Second = 3200, Speeds = From(200), Nd = VariableNd, Fastest = 60, DataRate = 120,
                        Formats = F("8.6K 3:2", 35.9, "8.2K 17:9", 34.0, "5.8K 17:9", 24.1) },
-            new Body { Name = "Sony FX9", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC-I", Base = 800, Speeds = From(200), Nd = VariableNd, Fastest = 60, DataRate = 75,
+            new Body { Name = "Sony FX9", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC-I", Base = 800, Second = 4000, Speeds = From(200), Nd = VariableNd, Fastest = 60, DataRate = 75,
                        Formats = F("FF 6K", 35.7, "S35 4K", 24.6) },
-            new Body { Name = "Sony FX6", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC-I", Base = 800, Speeds = From(200), Nd = VariableNd, Fastest = 120, DataRate = 75,
+            new Body { Name = "Sony FX6", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC-I", Base = 800, Second = 12800, Speeds = From(200), Nd = VariableNd, Fastest = 120, DataRate = 75,
                        Formats = F("FF 4K", 35.6, "S35", 23.7) },
-            new Body { Name = "Sony FX3", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC S-I", Base = 800, Speeds = From(100), Nd = null, Fastest = 120, DataRate = 75,
+            new Body { Name = "Sony FX3", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC S-I", Base = 800, Second = 12800, Speeds = From(100), Nd = null, Fastest = 120, DataRate = 75,
                        Formats = F("FF 4K", 35.6, "APS-C", 23.5) },
-            new Body { Name = "Sony FX30", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC S-I", Base = 800, Speeds = From(100), Nd = null, Fastest = 120, DataRate = 75,
+            new Body { Name = "Sony FX30", Maker = Maker.SonyFx, Curve = 3, Codec = "XAVC S-I", Base = 800, Second = 2500, Speeds = From(100), Nd = null, Fastest = 120, DataRate = 75,
                        Formats = F("APS-C 4K", 23.3) },
 
             new Body { Name = "RED V-RAPTOR [X] 8K VV", Maker = Maker.Red, Curve = 6, Codec = "R3D HQ", Base = 800, Speeds = RedIso, Nd = null, Fastest = 120, DataRate = 280,
@@ -108,18 +124,18 @@ namespace CineCamera
                        Formats = F("12K 3:2 Open Gate", 35.64, "9K Super 35", 26.73) },
             new Body { Name = "Blackmagic URSA Mini Pro 12K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 8:1", Base = 800, Speeds = From(200), Nd = TwoFourSix, Fastest = 60, DataRate = 240,
                        Formats = F("12K 17:9", 27.03, "6K Super 16", 13.51) },
-            new Body { Name = "Blackmagic PYXIS 6K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Speeds = From(100), Nd = null, Fastest = 36, DataRate = 160,
+            new Body { Name = "Blackmagic PYXIS 6K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Second = 3200, Speeds = From(100), Nd = null, Fastest = 36, DataRate = 160,
                        Formats = F("6K 3:2 Open Gate", 36.0, "4K DCI", 24.2) },
-            new Body { Name = "Blackmagic Cinema Camera 6K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Speeds = From(100), Nd = null, Fastest = 36, DataRate = 160,
+            new Body { Name = "Blackmagic Cinema Camera 6K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Second = 3200, Speeds = From(100), Nd = null, Fastest = 36, DataRate = 160,
                        Formats = F("6K 3:2 Open Gate", 36.0, "4K DCI", 24.2) },
-            new Body { Name = "Blackmagic Pocket Cinema Camera 6K Pro", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Speeds = From(100), Nd = TwoFourSix, Fastest = 60, DataRate = 120,
+            new Body { Name = "Blackmagic Pocket Cinema Camera 6K Pro", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Second = 3200, Speeds = From(100), Nd = TwoFourSix, Fastest = 60, DataRate = 120,
                        Formats = F("6K 16:9", 23.10) },
-            new Body { Name = "Blackmagic Pocket Cinema Camera 4K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Speeds = From(100), Nd = null, Fastest = 60, DataRate = 60,
+            new Body { Name = "Blackmagic Pocket Cinema Camera 4K", Maker = Maker.Blackmagic, Curve = 7, Codec = "BRAW 5:1", Base = 400, Second = 3200, Speeds = From(100), Nd = null, Fastest = 60, DataRate = 60,
                        Formats = F("4K DCI", 18.96) },
 
-            new Body { Name = "Canon EOS C400", Maker = Maker.Canon, Curve = 9, Codec = "Cinema RAW Light", Base = 800, Speeds = From(200), Nd = CanonNd, Fastest = 60, DataRate = 260,
+            new Body { Name = "Canon EOS C400", Maker = Maker.Canon, Curve = 9, Codec = "Cinema RAW Light", Base = 800, Second = 3200, Speeds = From(200), Nd = CanonNd, Fastest = 60, DataRate = 260,
                        Formats = F("6000x3164", 36.0, "4096x2160 S35", 24.6) },
-            new Body { Name = "Canon EOS C80", Maker = Maker.Canon, Curve = 9, Codec = "XF-AVC", Base = 800, Speeds = From(200), Nd = CanonNd, Fastest = 60, DataRate = 100,
+            new Body { Name = "Canon EOS C80", Maker = Maker.Canon, Curve = 9, Codec = "XF-AVC", Base = 800, Second = 3200, Speeds = From(200), Nd = CanonNd, Fastest = 60, DataRate = 100,
                        Formats = F("6000x3164", 36.0, "4096x2160 S35", 24.6) },
             new Body { Name = "Canon EOS C500 Mark II", Maker = Maker.Canon, Curve = 9, Codec = "Cinema RAW Light", Base = 800, Speeds = From(200), Nd = CanonNd, Fastest = 60, DataRate = 260,
                        Formats = F("5952x3140", 38.1, "4096x2160 S35", 26.2) },
@@ -127,15 +143,37 @@ namespace CineCamera
                        Formats = F("4096x2160", 26.2, "3840x2160", 24.6) },
             new Body { Name = "Canon EOS C70", Maker = Maker.Canon, Curve = 5, Codec = "XF-AVC", Base = 800, Speeds = From(200), Nd = CanonNd, Fastest = 120, DataRate = 100,
                        Formats = F("4096x2160", 26.2, "3840x2160", 24.6) },
-            new Body { Name = "Canon EOS R5 C", Maker = Maker.Canon, Curve = 5, Codec = "Cinema RAW Light", Base = 800, Speeds = From(100), Nd = null, Fastest = 60, DataRate = 330,
+            new Body { Name = "Canon EOS R5 C", Maker = Maker.Canon, Curve = 5, Codec = "Cinema RAW Light", Base = 800, Second = 3200, Speeds = From(100), Nd = null, Fastest = 60, DataRate = 330,
                        Formats = F("8192x4320", 36.0, "5952x3140 S35", 22.5) },
 
-            new Body { Name = "Panasonic VariCam 35", Maker = Maker.Panasonic, Curve = 4, Codec = "AVC-I 4:4:4", Base = 800, Speeds = From(200), Nd = TwoFourSix, Fastest = 120, DataRate = 130,
+            new Body { Name = "Panasonic VariCam 35", Maker = Maker.Panasonic, Curve = 4, Codec = "AVC-I 4:4:4", Base = 800, Second = 5000, Speeds = From(200), Nd = TwoFourSix, Fastest = 120, DataRate = 130,
                        Formats = F("4096 x 2160", 24.58, "3840 x 2160", 23.04) },
-            new Body { Name = "Panasonic VariCam LT", Maker = Maker.Panasonic, Curve = 4, Codec = "AVC-I 4:2:2", Base = 800, Speeds = From(200), Nd = TwoFourSix, Fastest = 60, DataRate = 65,
+            new Body { Name = "Panasonic VariCam LT", Maker = Maker.Panasonic, Curve = 4, Codec = "AVC-I 4:2:2", Base = 800, Second = 5000, Speeds = From(200), Nd = TwoFourSix, Fastest = 60, DataRate = 65,
                        Formats = F("4096 x 2160", 24.58, "3840 x 2160", 23.04) },
-            new Body { Name = "Panasonic AU-EVA1", Maker = Maker.Panasonic, Curve = 4, Codec = "MOV-422L", Base = 800, Speeds = From(200), Nd = TwoFourSix, Fastest = 60, DataRate = 50,
+            new Body { Name = "Panasonic AU-EVA1", Maker = Maker.Panasonic, Curve = 4, Codec = "MOV-422L", Base = 800, Second = 2500, Speeds = From(200), Nd = TwoFourSix, Fastest = 60, DataRate = 50,
                        Formats = F("4096 x 2160", 24.60, "3840 x 2160", 23.06) },
+
+            // (Panasonic's LUMIX, 2026-11-06: the owner, "Add Lumix S5 II camera and its family". From its makers' operating instructions
+            // and specifications: V-Log at 640 (its low base; the high is 4000, 5000 on the S1II), no filters inside, each format named
+            // as the screen shows it, its size then its image area (FULL, APS-C, S35 on the S1H, P/P pixel for pixel), APS-C 24.5 mm
+            // wide as 4128 of the sensor's 6000 points; each with what the camera writes at that size and its rate at 24p (the 6K
+            // sizes are HEVC 4:2:0, 200 Mbps; ProRes RAW only at 5.8K pixel for pixel; 5.8K ProRes on the S5IIX to an SSD). The body's
+            // codec is the best it writes inside. Its fastest is 30 (29.97p, the 5.9K's and C4K's), the S1H's 6K stopping at 24. The
+            // BS1H, the S1H as a box, has no screen of its own: not among them.)
+            new Body { Name = "Panasonic LUMIX S5II", Maker = Maker.Lumix, Curve = 4, Codec = "422/10-L", Base = 640, Second = 4000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 18.75f,
+                       Formats = FC("6K FULL", 35.6, "420/10-L", 25, "C4K FULL", 35.6, "422/10-L", 18.75, "4K FULL", 35.6, "422/10-L", 18.75, "C4K APS-C", 24.5, "422/10-L", 18.75) },
+            new Body { Name = "Panasonic LUMIX S5IIX", Maker = Maker.Lumix, Curve = 4, Codec = "422/10-I", Base = 640, Second = 4000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 50,
+                       Formats = FC("6K FULL", 35.6, "420/10-L", 25, "5.8K FULL", 35.6, "422 HQ", 200, "C4K FULL", 35.6, "422/10-I", 50, "4K FULL", 35.6, "422/10-I", 50, "C4K APS-C", 24.5, "422/10-I", 50) },
+            new Body { Name = "Panasonic LUMIX S9", Maker = Maker.Lumix, Curve = 4, Codec = "422/10-L", Base = 640, Second = 4000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 18.75f,
+                       Formats = FC("6K FULL", 35.6, "420/10-L", 25, "C4K FULL", 35.6, "422/10-L", 18.75, "4K FULL", 35.6, "422/10-L", 18.75, "C4K APS-C", 24.5, "422/10-L", 18.75) },
+            new Body { Name = "Panasonic LUMIX S1II", Maker = Maker.Lumix, Curve = 4, Codec = "RAW HQ", Base = 640, Second = 5000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 425,
+                       Formats = FC("6K FULL", 35.6, "420/10-L", 25, "5.8K P/P", 34.2, "RAW HQ", 425, "C4K FULL", 35.6, "422/10-I", 50, "4K FULL", 35.6, "422/10-I", 50) },
+            new Body { Name = "Panasonic LUMIX S1IIE", Maker = Maker.Lumix, Curve = 4, Codec = "RAW HQ", Base = 640, Second = 4000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 425,
+                       Formats = FC("6K FULL", 35.6, "420/10-L", 25, "5.8K P/P", 34.3, "RAW HQ", 425, "C4K FULL", 35.6, "422/10-I", 50, "4K FULL", 35.6, "422/10-I", 50, "C4K APS-C", 24.5, "422/10-I", 50) },
+            new Body { Name = "Panasonic LUMIX S5", Maker = Maker.Lumix, Curve = 4, Codec = "422/10-L", Base = 640, Second = 4000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 18.75f,
+                       Formats = FC("C4K FULL", 35.6, "422/10-L", 18.75, "4K FULL", 35.6, "422/10-L", 18.75, "4K APS-C", 24.5, "422/10-L", 18.75) },
+            new Body { Name = "Panasonic LUMIX S1H", Maker = Maker.Lumix, Curve = 4, Codec = "422/10-I", Base = 640, Second = 4000, Speeds = From(640), Nd = null, Fastest = 30, DataRate = 50,
+                       Formats = FC("6K FULL", 35.6, "420/10-L", 25, "5.9K FULL", 35.6, "420/10-L", 25, "C4K FULL", 35.6, "422/10-I", 50, "4K FULL", 35.6, "422/10-I", 50, "C4K S35", 24.5, "422/10-I", 50) },
 
             new Body { Name = "Fujifilm GFX100 II", Maker = Maker.Fujifilm, Curve = 10, Codec = "ProRes 422 HQ", Base = 1250, Speeds = From(1250), Nd = null, Fastest = 60, DataRate = 90,
                        Formats = F("GF 4K", 43.8, "35mm 8K", 35.9) },
@@ -150,7 +188,7 @@ namespace CineCamera
                        Formats = F("FX 8K", 35.9, "FX 4K", 35.9, "DX 4K", 23.5) },
             new Body { Name = "Nikon Z8", Maker = Maker.Nikon, Curve = 11, Codec = "N-RAW", Base = 800, Speeds = From(200), Nd = null, Fastest = 60, DataRate = 290,
                        Formats = F("FX 8K", 35.9, "FX 4K", 35.9, "DX 4K", 23.5) },
-            new Body { Name = "Nikon Z6III", Maker = Maker.Nikon, Curve = 11, Codec = "N-RAW", Base = 800, Speeds = From(200), Nd = null, Fastest = 60, DataRate = 190,
+            new Body { Name = "Nikon Z6III", Maker = Maker.Nikon, Curve = 11, Codec = "N-RAW", Base = 800, Second = 6400, Speeds = From(200), Nd = null, Fastest = 60, DataRate = 190,
                        Formats = F("FX 6K", 35.9, "DX 4K", 23.5) },
         };
 
@@ -161,6 +199,9 @@ namespace CineCamera
         static readonly float[] BmdAngles = { 11.2f, 22.5f, 45f, 60f, 72f, 90f, 120f, 144f, 172.8f, 180f, 216f, 270f, 360f };
         static readonly float[] CanonAngles = { 11.25f, 15f, 22.5f, 30f, 45f, 60f, 90f, 120f, 172.8f, 180f, 240f, 360f };
         static readonly float[] FxSpeeds = { 24, 25, 30, 48, 50, 60, 96, 100, 120, 125, 250, 500, 1000, 2000 };
+        // (the LUMIX's movie shutter goes no slower than 1/25)
+        static readonly float[] LumixSpeeds = { 25, 30, 48, 50, 60, 96, 100, 120, 125, 250, 500, 1000, 2000 };
+        static float[] SpeedsOf(Maker m) => m == Maker.Lumix ? LumixSpeeds : FxSpeeds;
         static readonly float[] Stops = { 1.4f, 1.6f, 1.8f, 2f, 2.2f, 2.5f, 2.8f, 3.2f, 3.5f, 4f, 4.5f, 5f, 5.6f, 6.3f, 7.1f, 8f, 9f, 10f, 11f, 13f, 14f, 16f, 18f, 20f, 22f };
         static readonly float[] Kelvins = { 2800, 3200, 3600, 4300, 5000, 5600, 6500, 7500, 9000 };
         static readonly float[] Tints = { -4, -3, -2, -1, 0, 1, 2, 3, 4 };
@@ -242,6 +283,33 @@ namespace CineCamera
             if (speed != null) speed.Value = b.Base;
             if (filter != null && b.Nd != null) filter.Value = Nearest(b.Nd, filter.Value);
             if (tool != null && tool.Value == 1 && FalseColour(b) == 4) tool.Value = 2;
+            // (a camera set by speeds given the nearest of its speeds: an ALEXA's 72 degrees were left as 1/192 on the Nikon Z6III,
+            // which has no such speed, 2026-11-06. One set by angles takes any angle, as the cameras do: its list is its presets.)
+            if (shutter != null && shutter.Value > 0f && BySpeed(b.Maker)) shutter.Value = NearestStop(SpeedsOf(b.Maker), shutter.Value);
+            // (and the frame rate to the fastest the camera has where it was faster: 25 or 29.97 carried to a camera that stops at
+            // 24 could be neither shown in its list nor got back, 2026-11-06)
+            if (rate != null && !RateHas(b, rate.Value))
+            {
+                int best = -1;
+                for (int i = 0; i < Rates.Length; i++) if (RateHas(b, i) && (best < 0 || Mathf.Abs(Rates[i] - Rates[Mathf.Clamp(rate.Value, 0, Rates.Length - 1)]) < Mathf.Abs(Rates[best] - Rates[Mathf.Clamp(rate.Value, 0, Rates.Length - 1)]))) best = i;
+                if (best >= 0) rate.Value = best;
+            }
+        }
+
+        /// <summary>The step nearest in stops (by ratio, not difference: 1/192 is nearer 1/250 than 1/125).</summary>
+        static float NearestStop(float[] steps, float v)
+        {
+            float best = steps[0];
+            foreach (float s in steps) if (s > 0f && Mathf.Abs(Mathf.Log(s / v)) < Mathf.Abs(Mathf.Log(best / v))) best = s;
+            return best;
+        }
+
+        /// <summary>Whether a camera can be set to the frame rate of this place in Rates: up to its fastest, and on a LUMIX not the
+        /// whole 30 and 60 (its 59.94 Hz rates are 29.97p and 59.94p; 24.00p is a mode of its own, kept).</summary>
+        static bool RateHas(Body b, int i)
+        {
+            if (i < 0 || i >= Rates.Length || Rates[i] > b.Fastest + 0.01f) return false;
+            return b.Maker != Maker.Lumix || (Rates[i] != 30f && Rates[i] != 60f);
         }
 
         static float Nearest(float[] steps, float v)
@@ -305,6 +373,20 @@ namespace CineCamera
 
         // ---- what the lens takes from it (Cine.cs)
 
+        /// <summary>The chosen camera's own base ISO, for its grain (Cine.Grain); 800 where Cinema Camera's own is chosen, as most cinema cameras'.</summary>
+        public static float BaseIso()
+        {
+            Body b = Chosen;
+            return b != null && b.Base > 0f ? b.Base : 800f;
+        }
+
+        /// <summary>The chosen camera's second base ISO, for its grain (Cine.Grain); 0 where it has none, or Cinema Camera's own is chosen.</summary>
+        public static float SecondIso()
+        {
+            Body b = Chosen;
+            return b != null ? b.Second : 0f;
+        }
+
         /// <summary>The height of sensor the lens sees through, mm, for its angle of view: the chosen camera's format's width, as the picture's shape takes it. Less than nought where Cinema Camera's own is chosen.</summary>
         public static float High()
         {
@@ -344,6 +426,7 @@ namespace CineCamera
         float chargeAt, freeAt;
         static float charge = -1f;
         static double free = -1.0;
+        static volatile bool asking;
 
         void Start() => running = this;
 
@@ -357,6 +440,8 @@ namespace CineCamera
         void Update()
         {
             scope.Read();
+            // (the battery and the room left to record in are shown only on a camera's screen: read only while one is up)
+            if (Time.frameCount - drawnAt > 3) return;
             if (Time.unscaledTime > chargeAt)
             {
                 chargeAt = Time.unscaledTime + 0.5f;
@@ -368,13 +453,34 @@ namespace CineCamera
                     if (holds > 0.0) charge = (float)(have / holds);
                 }
             }
-            if (Time.unscaledTime > freeAt)
+            if (Time.unscaledTime > freeAt && !asking)
             {
                 freeAt = Time.unscaledTime + 5f;
-                try { free = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(KSPUtil.ApplicationRootPath))).AvailableFreeSpace; }
-                catch (Exception) { free = -1.0; }
+                asking = true;
+                string root = Path.GetPathRoot(Path.GetFullPath(KSPUtil.ApplicationRootPath));
+                bool windows = Application.platform == RuntimePlatform.WindowsPlayer;
+                System.Threading.ThreadPool.QueueUserWorkItem(_ => { free = Room(root, windows); asking = false; });
             }
         }
+
+        /// <summary>
+        /// The room left on the game's own disk, in bytes (less than nought: not known); asked on a worker thread, never in a frame.
+        /// Mono's DriveInfo first asks every drive what it is, and on Windows a mapped network drive whose server is away takes
+        /// 21 s to answer: the game stood still that long every so often in flight (seen on the PC, 2026-10-24, with a drive mapped
+        /// to a computer that was off). So on Windows only the game's own drive is asked, of Windows itself.
+        /// </summary>
+        static double Room(string root, bool windows)
+        {
+            try
+            {
+                if (windows) return GetDiskFreeSpaceEx(root, out ulong mine, out ulong size, out ulong left) ? mine : -1.0;
+                return new DriveInfo(root).AvailableFreeSpace;
+            }
+            catch (Exception) { return -1.0; }
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        static extern bool GetDiskFreeSpaceEx(string directory, out ulong freeToCaller, out ulong size, out ulong totalFree);
 
         void LateUpdate()
         {
@@ -382,7 +488,7 @@ namespace CineCamera
             bool drawn = Time.frameCount - drawnAt <= 3;
             if (!drawn) { scope.Off(); if (open != What.None && !testing) open = What.None; return; }
             Camera near = FlightCamera.fetch != null ? FlightCamera.fetch.mainCamera : null;
-            scope.Spot = Chosen != null && Chosen.Maker == Maker.Panasonic;
+            scope.Spot = Chosen != null && (Chosen.Maker == Maker.Panasonic || Chosen.Maker == Maker.Lumix);
             scope.Use(near, 0f, 1f);
         }
 
@@ -422,6 +528,7 @@ namespace CineCamera
                 case Maker.Panasonic: Panasonic(s); break;
                 case Maker.Fujifilm: Fujifilm(s); break;
                 case Maker.Nikon: Nikon(s); break;
+                case Maker.Lumix: Lumix(s); break;
             }
             Picker(s);
             return true;
@@ -460,7 +567,10 @@ namespace CineCamera
                 Clock = (whole / 3600 % 24).ToString("00") + ":" + (whole / 60 % 60).ToString("00") + ":" + (whole % 60).ToString("00") + ":" + Mathf.Min((int)((t - whole) * frames), frames - 1).ToString("00");
             }
             /// <summary>The media's time left, minutes, at what the camera writes and the frame rate: from the room left on this computer's disk.</summary>
-            public float MediaMinutes => free < 0.0 ? -1f : (float)(free / (Body.DataRate * 1048576.0 * Rate / 24.0) / 60.0);
+            public float MediaMinutes => free < 0.0 ? -1f : (float)(free / (WritesAt * 1048576.0 * Rate / 24.0) / 60.0);
+            /// <summary>What the camera writes at this format, and its rate: the format's own where it has one, else the body's.</summary>
+            public string Writes { get { Format f = FormatOf(Body); return f.Codec ?? Body.Codec; } }
+            public float WritesAt { get { Format f = FormatOf(Body); return f.DataRate > 0f ? f.DataRate : Body.DataRate; } }
         }
 
         static Texture2D white, round;
@@ -584,9 +694,9 @@ namespace CineCamera
         static float[] AnglesOf(Maker m) => m == Maker.Arri || m == Maker.Panasonic ? ArriAngles : m == Maker.Blackmagic ? BmdAngles : m == Maker.Canon ? CanonAngles : SonyAngles;
 
         /// <summary>The shutter as the camera sets it: an angle (snapped to the nearest of its own within a hair: the shutter's own setting is kept in whole fractions of a second) or, on Sony's FX cameras, a speed.</summary>
-        static bool BySpeed(Maker m) => m == Maker.SonyFx || m == Maker.Fujifilm || m == Maker.Nikon;
+        static bool BySpeed(Maker m) => m == Maker.SonyFx || m == Maker.Fujifilm || m == Maker.Nikon || m == Maker.Lumix;
 
-        static string SpeedSaid(Maker m, float x) => (m == Maker.Fujifilm ? "" : "1/") + Mathf.RoundToInt(x).ToString(CultureInfo.InvariantCulture);
+        static string SpeedSaid(Maker m, float x) => (m == Maker.Fujifilm || m == Maker.Lumix ? "" : "1/") + Mathf.RoundToInt(x).ToString(CultureInfo.InvariantCulture);
 
         static string ShutterSaid(Shown s)
         {
@@ -612,6 +722,7 @@ namespace CineCamera
                 case Maker.Blackmagic:
                 case Maker.Fujifilm: return Mathf.Abs(r - Mathf.Round(r)) < 0.001f ? Mathf.RoundToInt(r).ToString(inv) : r.ToString("0.00", inv);
                 case Maker.Nikon: return Mathf.RoundToInt(r).ToString(inv) + "p";
+                case Maker.Lumix: return r.ToString("0.00", inv) + "p";
                 default: return r.ToString("0.00", inv);
             }
         }
@@ -1140,6 +1251,76 @@ namespace CineCamera
             if (s.Doing.Length > 0) Say(0.5f * W, inner + 2f * k, s.Doing, 12.5f * k, new Color(1f, 1f, 1f, 0.75f), 0, e);
         }
 
+        // ---- Panasonic LUMIX (S5II, S5IIX, S9, S1II, S1IIE; the S5 and S1H before them): the video live view of the S5II's operating
+        // instructions ("Recording Modes Specifically for Video", "Monitor/Viewfinder Displays"; the S5IIX's, S9's and S1II's show
+        // the same): a black strip over the picture (the photo style, the file format, the recording quality as its resolution,
+        // sampling and frame rate, the image area, the focus mode) and one under it (the record dot, the exposure mode, the shutter
+        // as its denominator, the aperture, the exposure compensation, the ISO, the card slots and the time left, the battery); the
+        // time code and the time recorded over the lower left. All in white; red only for the dot while it records.
+
+        static void Lumix(Shown s)
+        {
+            float k = s.K, W = s.Wide, strip = 30f * k, size = 15f * k, small = 11f * k, gap = 13f * k;
+            Edge e = Edge.Outline;
+            var inv = CultureInfo.InvariantCulture;
+            Box(new Rect(0f, s.Top, W, strip), new Color(0f, 0f, 0f, 0.92f));
+            Box(new Rect(0f, s.Bottom - strip, W, strip), new Color(0f, 0f, 0f, 0.92f));
+            float ty = s.Top + 0.5f * (strip - size * 1.2f), by = s.Bottom - strip + 0.5f * (strip - size * 1.2f), lift = 0.45f * (size - small);
+            // (the strip over the picture: "6K FULL" is its resolution, then after the frame rate its image area)
+            int cut = s.Format.LastIndexOf(' ');
+            string res = cut > 0 ? s.Format.Substring(0, cut) : s.Format, area = cut > 0 ? s.Format.Substring(cut + 1) : "FULL";
+            bool vlog = Luts.recorded != null && Luts.recorded.Value == 4;
+            float x = 14f * k;
+            x += Value(x, ty, (vlog ? "V-LOG" : "STD.") + (s.Laid ? "  LUT" : ""), size, White, What.Look) + 2f * gap;
+            x += Say(x, ty, "MOV", size, White) + gap;
+            x += Value(x, ty, res, size, White, What.Format) + 0.6f * gap;
+            x += Say(x, ty + lift, s.Writes, small, White) + 0.6f * gap;
+            x += Value(x, ty, RateSaid(s.Maker, s.Rate), size, White, What.Rate) + gap;
+            x += Say(x, ty, area, size, White) + gap;
+            x += Say(x, ty, s.Manual ? "MF" : "AFC", size, White) + gap;
+            Value(x, ty, "WB " + Kelvin(s.Kelvin), size, White, What.Balance);
+            float R = W - 14f * k;
+            float r = R - Value(R, ty, Peaking ? "PEAK" : "PEAK OFF", size, Peaking ? Amber : White, What.Peaking, 1) - gap;
+            Value(r, ty, Tool == 4 ? "ZEBRA1 " + Mathf.RoundToInt(ZebraLevel * 100f) + "%" : "ZEBRA OFF", size, Tool == 4 ? Amber : White, What.Tool, 1);
+            // (the strip under the picture)
+            Dot(18f * k, s.Bottom - 0.5f * strip, 11f * k, s.Rec ? RecRed : Green);
+            x = 34f * k;
+            x += Say(x, by, "M", size, White) + 1.5f * gap;
+            x += Value(x, by, ShutterSaid(s), size, White, What.Shutter) + gap;
+            x += Value(x, by, IrisSaid(s.Maker, s.Iris), size, White, What.Iris) + gap;
+            x += Say(x, by, "±0", size, White) + gap;
+            x += Say(x, by + lift, "ISO", small, White) + 3f * k;
+            Value(x, by, Mathf.RoundToInt(s.Speed).ToString(inv), size, White, What.Speed);
+            Battery(R - 34f * k, by + 1f * k, 34f * k, 15f * k, k);
+            float m = s.MediaMinutes;
+            string left = m < 0f ? "--m--s" : m >= 60f ? Mathf.FloorToInt(m / 60f) + "h" + Mathf.FloorToInt(m % 60f).ToString("00", inv) + "m"
+                                                     : Mathf.FloorToInt(m) + "m" + Mathf.FloorToInt(m * 60f % 60f).ToString("00", inv) + "s";
+            r = R - 34f * k - gap;
+            r -= Say(r, by, left, size, White, 1) + gap;
+            // (the card slots: two, the S9's one)
+            float cw = Width("2", small) + 6f * k;
+            for (int n = s.Body.Name.EndsWith(" S9", StringComparison.Ordinal) ? 0 : 1; n >= 0; n--)
+            {
+                var slot = new Rect(r - cw, by + 1f * k, cw, size * 1.1f);
+                Frame(slot, Mathf.Max(1f, k), White);
+                Say(slot.x + 3f * k, by + lift, (n + 1).ToString(inv), small, White);
+                r -= cw + 8f * k;
+            }
+            // (over the lower left: the time code, and under it the time recorded)
+            int whole = (int)s.Seconds;
+            string took = (whole >= 3600 ? whole / 3600 + "h" : "") + (whole >= 60 ? (whole / 60 % 60).ToString(whole >= 3600 ? "00" : "0", inv) + "m" : "")
+                          + (whole % 60).ToString(whole >= 60 ? "00" : "0", inv) + "s";
+            Say(14f * k, s.Bottom - strip - 2.6f * size, "TC " + s.Clock, small + 1f * k, White, -1, e);
+            Say(14f * k, s.Bottom - strip - 1.4f * size, took, size, White, -1, e);
+            // (its luminance spot meter, in stops in V-Log, and the waveform, moved to where they keep out of the way)
+            float reading = running != null ? running.scope.Reading : float.NaN;
+            if (!float.IsNaN(reading)) Say(0.5f * W, s.Bottom - strip - 1.6f * size, (reading >= 0f ? "+" : "") + reading.ToString("0.0", inv) + " Stop", size, White, 0, e);
+            var wave = new Rect(R - 150f * k, s.Bottom - strip - 92f * k, 150f * k, 72f * k);
+            Waveform(wave, new Color(0f, 0f, 0f, 0.45f), White);
+            Frame(wave, Mathf.Max(1f, k), Green);
+            if (s.Doing.Length > 0) Say(0.5f * W, s.Top + strip + 10f * k, s.Doing, 12.5f * k, new Color(1f, 1f, 1f, 0.75f), 0, e);
+        }
+
         static string Hms(double seconds)
         {
             int t = (int)Math.Max(0.0, Math.Min(seconds, 359999.0));
@@ -1256,13 +1437,13 @@ namespace CineCamera
             switch (what)
             {
                 case What.Rate:
-                    for (int i = 0; i < Rates.Length; i++) if (Rates[i] <= b.Fastest + 0.01f) Add(RateSaid(m, Rates[i]), i);
+                    for (int i = 0; i < Rates.Length; i++) if (RateHas(b, i)) Add(RateSaid(m, Rates[i]), i);
                     current = optionValues.IndexOf(rate != null ? rate.Value : 1);
                     break;
                 case What.Shutter:
                     if (BySpeed(m))
                     {
-                        foreach (float v in FxSpeeds) Add(SpeedSaid(m, v), v);
+                        foreach (float v in SpeedsOf(m)) Add(SpeedSaid(m, v), v);
                         current = optionValues.IndexOf(Mathf.Round(shutter != null ? shutter.Value : 48f));
                     }
                     else
@@ -1278,7 +1459,7 @@ namespace CineCamera
                     }
                     break;
                 case What.Speed:
-                    foreach (float v in b.Speeds) Add((m == Maker.Canon || m == Maker.SonyFx || m == Maker.Fujifilm || m == Maker.Nikon ? "ISO " : m == Maker.Arri || m == Maker.Venice ? "EI " : "") + v, v);
+                    foreach (float v in b.Speeds) Add((m == Maker.Canon || m == Maker.SonyFx || m == Maker.Fujifilm || m == Maker.Nikon || m == Maker.Lumix ? "ISO " : m == Maker.Arri || m == Maker.Venice ? "EI " : "") + v, v);
                     current = optionValues.IndexOf(Mathf.Round(s.Speed));
                     break;
                 case What.Nd:
@@ -1305,12 +1486,12 @@ namespace CineCamera
                 case What.Tool:
                     Add(m == Maker.Red ? "Tools off" : "Off", 0);
                     if (FalseColour(b) != 4) Add(m == Maker.Red ? "Exposure (false colour)" : m == Maker.Arri ? "False Color" : "False color", 1);
-                    Add(m == Maker.Canon || m == Maker.Panasonic ? "Zebra 1" : "Zebra", 2);
+                    Add(m == Maker.Canon || m == Maker.Panasonic ? "Zebra 1" : m == Maker.Lumix ? "ZEBRA1" : "Zebra", 2);
                     current = optionValues.IndexOf(tool != null ? tool.Value : 0);
                     break;
                 case What.Look:
-                    Add(m == Maker.Venice || m == Maker.SonyFx ? "s709" : m == Maker.Fujifilm || m == Maker.Nikon ? "View assist on" : "LUT on", 1);
-                    Add(m == Maker.Venice || m == Maker.SonyFx ? "S-Log3 (LUT off)" : m == Maker.Fujifilm || m == Maker.Nikon ? "View assist off" : "LUT off", 0);
+                    Add(m == Maker.Venice || m == Maker.SonyFx ? "s709" : m == Maker.Fujifilm || m == Maker.Nikon ? "View assist on" : m == Maker.Lumix ? "LUT View Assist on" : "LUT on", 1);
+                    Add(m == Maker.Venice || m == Maker.SonyFx ? "S-Log3 (LUT off)" : m == Maker.Fujifilm || m == Maker.Nikon ? "View assist off" : m == Maker.Lumix ? "LUT View Assist off" : "LUT off", 0);
                     current = s.Laid ? 0 : 1;
                     break;
             }
@@ -1389,6 +1570,7 @@ namespace CineCamera
                 case Maker.Panasonic: panel = new Color(0.08f, 0.1f, 0.14f, 0.92f); lit = new Color(0.3f, 0.55f, 0.95f, 1f); litText = White; break;
                 case Maker.Fujifilm: panel = new Color(0.06f, 0.06f, 0.06f, 0.92f); lit = new Color(0.25f, 0.55f, 0.95f, 1f); litText = White; break;
                 case Maker.Nikon: panel = new Color(0.05f, 0.05f, 0.05f, 0.94f); lit = new Color(1f, 0.85f, 0.1f, 1f); litText = Color.black; break;
+                case Maker.Lumix: panel = new Color(0.12f, 0.12f, 0.12f, 0.94f); lit = new Color(0.86f, 0.86f, 0.86f, 1f); litText = Color.black; break;
                 default: panel = new Color(0.12f, 0.12f, 0.12f, 0.94f); lit = Amber; litText = Color.black; break;
             }
             Box(pickerBox, panel);
