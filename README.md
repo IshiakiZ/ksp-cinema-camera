@@ -7,7 +7,7 @@ the picture what it does on a camera. With camera moves, and a viewfinder to loo
 
 ![A launch followed from well off to one side through a 200 mm lens: the camera stays where it is and turns to follow](src/CineCamera/img/cinema-camera-follow.gif)
 
-For Kerbal Space Program 1.12.x. **Needs [Keystone](https://github.com/IshiakiZ/ksp-keystone) 0.9 or later**, a separate download
+For Kerbal Space Program 1.12.x. **Needs [Keystone](https://github.com/IshiakiZ/ksp-keystone) 0.11 or later**, a separate download
 ([on SpaceDock](https://spacedock.info/mod/4665/Keystone)): this mod does not load without it.
 
 ## Install
